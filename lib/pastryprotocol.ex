@@ -7,7 +7,8 @@ defmodule PastryProtocol do
     IO.puts "Nodes   : #{numNodes}"
     IO.puts "Requests: #{numRequests}"
     nodeList = start(numNodes, [], [])
-    loop()
+    send self, {:getStats}
+    loop(nodeList)
   end
 
   def start(numNodes, nodeList, pidList) when numNodes > 0 do
@@ -25,9 +26,14 @@ defmodule PastryProtocol do
     [nodeList, pidList]
   end
 
-  def loop do
+  def loop(nodeList) do
     receive do
-
+      {:getStats} ->
+        :timer.sleep(20000)
+        for x <- Enum.at(nodeList, 1) do
+          send x, {:print, self}
+        end
+        loop(nodeList)
     end
   end
 end

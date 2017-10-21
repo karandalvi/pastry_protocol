@@ -8,73 +8,82 @@ defmodule PNode do
                "4" => [], "5" => [], "6" => [], "7" => [],
                "8" => [], "9" => [], "A" => [], "B" => [],
                "C" => [], "D" => [], "E" => [], "F" => []}
-    routingTable = buildRoutingTable(%{}, 31, rowMap)
+    routingTable = buildRoutingTable(%{}, 30, rowMap)
     loop(nodeID, leafset, routingTable)
   end
 
   def loop(nodeID, leafset, routingTable) do
     receive do
       {:join, startNode} ->
-        send startNode, {:discover, self, nodeID}
+        send startNode, {:discover, self, nodeID, false}
         loop(nodeID, leafset, routingTable)
 
       {:update, senderPID, senderID, senderLeafset, senderRoutingTable} ->
         # IO.puts "#{nodeID} received routing table from #{senderID}"
-        if length(leafset) < 3 do
-          leafset = addToSortedList(leafset, senderID, senderPID, 0)
+        allNodes = buildList(senderRoutingTable, [], 30) ++ senderLeafset
+        allNodes = [[senderID, senderPID] | allNodes]
+        for x <- allNodes do
+          [nID, nPID] = x
+          send self, {:discover, nPID, nID, true}
         end
         loop(nodeID, leafset, routingTable)
 
-      {:discover, newNodePID, newNodeID} ->
+      {:discover, newNodePID, newNodeID, selfMessage} ->
         # Check if leafset is not full
-        if length(leafset) < 3 do
+        if length(leafset) < 15 do
           leafset = addToSortedList(leafset, newNodeID, newNodePID, 0)
-          send newNodePID, {:update, self, nodeID, leafset, routingTable}
         else
           # Check min max values in leaves
           if hexToDec(newNodeID) >= hexToDec(Enum.at(Enum.at(leafset, 0), 0)) and hexToDec(newNodeID) <= hexToDec(Enum.at(Enum.at(leafset, length(leafset)-1), 0)) do
             result = findInLeaves(addToSortedList(leafset, nodeID, self, 0), newNodeID, 0)
-            if (Enum.at(result, 0) == nodeID) do
-              # search ends at this node
-              send newNodePID, {:update, self, nodeID, leafset, routingTable}
-              # update leaves
-              if (hexToDec(newNodeID) < hexToDec(nodeID)) do
-                # remove leftmost leaf & insert into routingTable
-                deletedEntry = Enum.at(leafset, 0)
-                pvalue = prefixMatch(0, Enum.at(deletedEntry,0), newNodeID)
-                r = Map.get(routingTable, Integer.to_string(pvalue))
-                r = Map.put(r, String.at(Enum.at(deletedEntry, 0), pvalue), deletedEntry)
-                routingTable = Map.put(routingTable, Integer.to_string(pvalue), r)
-                leafset = List.delete_at(leafset, 0)
-              else
-                # remove rightmost leaf & insert into routingTable
-                deletedEntry = Enum.at(leafset, length(leafset)-1)
-                pvalue = prefixMatch(0, Enum.at(deletedEntry,0), newNodeID)
-                r = Map.get(routingTable, Integer.to_string(pvalue))
-                r = Map.put(r, String.at(Enum.at(deletedEntry, 0), pvalue), deletedEntry)
-                routingTable = Map.put(routingTable, Integer.to_string(pvalue), r)
-                leafset = List.delete_at(leafset, length(leafset)-1)
-              end
-              # IO.inspect routingTable
-              # add new discovered node to leafset
-              leafset = addToSortedList(leafset, newNodeID, newNodePID, 0)
+
+            # update leaves
+            if (hexToDec(newNodeID) < hexToDec(nodeID)) do
+              # remove leftmost leaf & insert into routingTable
+              deletedEntry = Enum.at(leafset, 0)
+              pvalue = prefixMatch(0, Enum.at(deletedEntry,0), newNodeID)
+              r = Map.get(routingTable, Integer.to_string(pvalue))
+              r = Map.put(r, String.at(Enum.at(deletedEntry, 0), pvalue), deletedEntry)
+              routingTable = Map.put(routingTable, Integer.to_string(pvalue), r)
+              leafset = List.delete_at(leafset, 0)
             else
-              # delegate search to a leaf node
-              send Enum.at(result,1), {:discover, newNodePID, newNodeID}
-              send newNodePID, {:update, self, nodeID, leafset, routingTable}
+              # remove rightmost leaf & insert into routingTable
+              deletedEntry = Enum.at(leafset, length(leafset)-1)
+              pvalue = prefixMatch(0, Enum.at(deletedEntry,0), newNodeID)
+              r = Map.get(routingTable, Integer.to_string(pvalue))
+              r = Map.put(r, String.at(Enum.at(deletedEntry, 0), pvalue), deletedEntry)
+              routingTable = Map.put(routingTable, Integer.to_string(pvalue), r)
+              leafset = List.delete_at(leafset, length(leafset)-1)
+            end
+            # add new discovered node to leafset
+            leafset = addToSortedList(leafset, newNodeID, newNodePID, 0)
+
+            if (Enum.at(result, 0) != nodeID) do
+              if !selfMessage, do: send Enum.at(result,1), {:discover, newNodePID, newNodeID}
             end
 
-          else
+          else #outside leafset range
+
               # if newNodeID outside leafset range, check routing table
               p = prefixMatch(0, nodeID, newNodeID)
-              # routing node -> [nodeID, nodePID]
               routingNode = Map.get(Map.get(routingTable, Integer.to_string(p)), String.at(newNodeID, p))
+
               if routingNode == [] do
-                # T U M U R
+                # TUMUR
+                allNodes = buildSortedList(routingTable, [], 30)
+                allNodes = mergeSortedLists([], allNodes, leafset)
+                allNodes = mergeSortedLists([], allNodes, [[nodeID, self]])
+                result = findInLeaves(allNodes, newNodeID, 0)
+                if Enum.at(result, 0) != nodeID do
+                  send Enum.at(result,1), {:discover, newNodePID, newNodeID}
+                end
+                # add new node to routing table
+                r = Map.get(routingTable, Integer.to_string(p))
+                r = Map.put(r, String.at(newNodeID, p), [newNodeID, newNodePID])
+                routingTable = Map.put(routingTable, Integer.to_string(p), r)
               else
-                # delegate ahead
-                send newNodePID, {:update, self, nodeID, leafset, routingTable}
-                send Enum.at(routingNode,1), {:update, self, nodeID, leafset, routingTable}
+                # delegate discovery to node found in routing table
+                if !selfMessage, do: send Enum.at(routingNode,1), {:discover, newNodePID, newNodeID}
               end
           end
         end
@@ -84,9 +93,16 @@ defmodule PNode do
         #     (String.at(nodeID, 3) == "7") do
         #   IO.inspect leafset
         # end
-        # IO.puts "#{nodeID} [#{length(leafset)}] received discover message from #{newNodeID}"
+        if !selfMessage do
+          # IO.puts "#{nodeID} [#{length(leafset)}] received discovery msg from #{newNodeID}"
+        end
 
+        if !selfMessage, do: send newNodePID, {:update, self, nodeID, leafset, routingTable}
         loop(nodeID, leafset, routingTable)
+
+        {:print, console} ->
+          IO.puts "#{nodeID} | #{length(leafset)} | #{length(buildList(routingTable, [], 30))} | #{Enum.at(Enum.at(leafset, 0), 0)} | #{Enum.at(Enum.at(leafset, length(leafset) - 1), 0)}"
+          loop(nodeID, leafset, routingTable)
     end
   end
 
@@ -144,8 +160,81 @@ defmodule PNode do
       end
     end
   end
-  # Code to Insert Data into Map
-  # r = Map.get(routingTable, "0")
-  # r = Map.put(r, "9", ["hello"])
-  # routingTable = Map.put(routingTable, "0", r)
+
+  def getDigit (i) do
+    dmap = %{0 => "0", 1 => "1", 2 => "2", 3 => "3",
+      4 => "4", 5 => "5", 6 => "6", 7 => "7",
+      8 => "8", 9 => "9", 10 => "A", 11 => "B",
+      12 => "C", 13 => "D", 14 => "E", 15 => "F"}
+    Map.get(dmap, i)
+  end
+
+  def buildList(routingTable, list, rowIndex) when rowIndex >= 0 do
+    row = Map.get(routingTable, Integer.to_string(rowIndex))
+    rowList = buildRowList(row, [], 15)
+    if (rowList != []), do: list = list ++ rowList
+    buildList(routingTable, list, rowIndex - 1)
+  end
+
+  def buildList(routingTable, list, rowIndex) when rowIndex < 0 do
+    list
+  end
+
+  def buildRowList(routingRow, list, digitIndex) when digitIndex >= 0 do
+    entry = Map.get(routingRow, getDigit(digitIndex))
+
+    if (entry != []), do: list = List.insert_at(list, 0, entry)
+    buildRowList(routingRow, list, digitIndex - 1)
+  end
+
+  def buildRowList(routingRow, list, digitIndex) when digitIndex < 0 do
+    list
+  end
+
+
+  def buildSortedList(routingTable, list, rowIndex) when rowIndex >= 0 do
+    row = Map.get(routingTable, Integer.to_string(rowIndex))
+    rowList = buildSortedRowList(row, [], 15)
+    if (rowList != []) do
+        list = mergeSortedLists([], list, rowList)
+    end
+    buildSortedList(routingTable, list, rowIndex - 1)
+  end
+
+  def buildSortedList(routingTable, list, rowIndex) when rowIndex < 0 do
+    list
+  end
+
+  def buildSortedRowList(routingRow, list, digitIndex) when digitIndex >= 0 do
+    entry = Map.get(routingRow, getDigit(digitIndex))
+    if (entry != []), do: list = addToSortedList(list, Enum.at(entry, 0), Enum.at(entry, 1), 0)
+    buildSortedRowList(routingRow, list, digitIndex - 1)
+  end
+
+  def buildSortedRowList(routingRow, list, digitIndex) when digitIndex < 0 do
+    list
+  end
+
+  def mergeSortedLists(sortedlist, list1, list2) do
+    if (length(list1) == 0 and length(list2) == 0) do
+      sortedlist
+    else
+      if length(list1) == 0 do
+        sortedlist ++ list2
+      else
+        if length(list2) == 0 do
+          sortedlist ++ list1
+        else
+          if hexToDec(Enum.at(hd(list1), 0)) < hexToDec(Enum.at(hd(list2), 0)) do
+            sortedlist = sortedlist ++ [hd(list1)]
+            mergeSortedLists(sortedlist, tl(list1), list2)
+          else
+            sortedlist = sortedlist ++ [hd(list2)]
+            mergeSortedLists(sortedlist, list1, tl(list2))
+          end
+        end
+      end
+    end
+  end
+
 end
