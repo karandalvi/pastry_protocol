@@ -7,13 +7,13 @@ defmodule PastryProtocol do
     IO.puts "Nodes   : #{numNodes}"
     IO.puts "Requests: #{numRequests}"
     nodeList = start(numNodes, [], [])
-    send self, {:getStats}
+    send self, {:getStatsNew}
     loop(nodeList, numNodes, numRequests, [])
   end
 
   def start(numNodes, nodeList, pidList) when numNodes > 0 do
     newNode = :crypto.hash(:md5, Integer.to_string(numNodes)) |> Base.encode16()
-    newPid = spawn(PNode, :init, [newNode])
+    newPid = spawn(PNode, :init, [newNode, Integer.to_string(numNodes)])
     send newPid, {:console, self}
     if length(pidList) > 0 do
       # send newPid, {:join, Enum.at(pidList, round(:math.floor(:rand.uniform() * length(pidList))))}
@@ -30,20 +30,39 @@ defmodule PastryProtocol do
 
   def loop(nodeList, numNodes, numRequests, hops) do
     receive do
+
+      {:getStatsNew} ->
+        nameList = Enum.at(nodeList, 0)
+        pidList = Enum.at(nodeList, 1)
+        # :timer.sleep(10000)
+        # for x <- pidList do
+        #   send x, {:print}
+        # end
+        # x = 2000
+        # r = round(:math.floor(:rand.uniform() * length(pidList)))
+        # if (r != 2000) do
+        #   IO.puts "Sending Request: Key - #{Enum.at(nameList, r)} to Node - #{Enum.at(nameList, x)}"
+        #   send Enum.at(pidList, x), {:sendRequest, Enum.at(pidList, r), Enum.at(nameList, r)}
+        # end
+
+        loop(nodeList, numNodes, numRequests, hops)
+
       {:getStats} ->
         nameList = Enum.at(nodeList, 0)
         pidList = Enum.at(nodeList, 1)
-        :timer.sleep(8000)
-        for x <- Enum.at(nodeList, 1) do
-          send x, {:print}
-          r = round(:math.floor(:rand.uniform() * length(pidList)))
-          # send x, {:sendRequest, Enum.at(pidList, r), Enum.at(nameList, r)}
-        end
+        # :timer.sleep(10000)
+        # for x <- Enum.at(nodeList, 1) do
+          # send x, {:print}
+          # r = round(:math.floor(:rand.uniform() * length(pidList)))
+          # if (x != Enum.at(pidList, r)) do
+            # send x, {:sendRequest, Enum.at(pidList, r), Enum.at(nameList, r)}
+          # end
+        # end
         loop(nodeList, numNodes, numRequests, hops)
 
       {:collectHopNumber, hopCount} ->
         hops = hops ++ [hopCount]
-        IO.inspect length(hops)
+        IO.puts hopCount
         # if length(hops) == (numRequests * numNodes) do
         #   IO.puts "All hops completed"
         # end

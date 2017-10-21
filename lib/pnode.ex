@@ -1,121 +1,151 @@
 defmodule PNode do
 
-  def init(nodeID) do
+  def init(nodeID, nodename) do
     Process.flag(:trap_exit, true)
     # IO.puts "Node started with ID:#{nodeID}"
-    leafset = []
+    leafset = [[nodeID, self]]
     rowMap = %{"0" => [], "1" => [], "2" => [], "3" => [],
                "4" => [], "5" => [], "6" => [], "7" => [],
                "8" => [], "9" => [], "A" => [], "B" => [],
                "C" => [], "D" => [], "E" => [], "F" => []}
     routingTable = buildRoutingTable(%{}, 30, rowMap)
-    loop(nodeID, leafset, routingTable, [])
+    loop(nodeID, leafset, routingTable, [], nodename)
   end
 
-  def loop(nodeID, leafset, routingTable, console) do
+  def loop(nodeID, leafset, routingTable, console, nodename) do
     receive do
       {:console, id} ->
-        loop(nodeID, leafset, routingTable, id)
+        loop(nodeID, leafset, routingTable, id, nodename)
 
       {:join, startNode} ->
-        send startNode, {:discover, self, nodeID, 0, 0}
-        loop(nodeID, leafset, routingTable, console)
+        send startNode, {:discover, self, nodeID, nodename, 0, 0}
+        loop(nodeID, leafset, routingTable, console, nodename)
 
-      {:update, senderPID, senderID, senderLeafset, senderRoutingTable} ->
-        # IO.puts "#{nodeID} received routing table from #{senderID}"
+      {:update, senderPID, senderID, senderName, senderLeafset, senderRoutingTable} ->
+        IO.puts "#{senderName} -> table -> #{nodename}"
         send console, {:running}
         allNodes = buildList(senderRoutingTable, [], 30) ++ senderLeafset
-        allNodes = [[senderID, senderPID] | allNodes]
+        # allNodes = [[senderID, senderPID] | allNodes]
         for x <- allNodes do
           [nID, nPID] = x
-          send self, {:discover, nPID, nID, 1, 0}
+          send self, {:discover, nPID, nID, nodename, 1, 0}
         end
-        loop(nodeID, leafset, routingTable, console)
+        loop(nodeID, leafset, routingTable, console, nodename)
 
-      {:discover, newNodePID, newNodeID, selfMessage, hop} ->
-        # Check if leafset is not full
-        if length(leafset) < 4 do
-          leafset = addToSortedList(leafset, newNodeID, newNodePID, 0)
-          if selfMessage == 2, do: send console, {:collectHopNumber, hop}
+      {:discover, newNodePID, newNodeID, newNodeName, selfMessage, hop} ->
+
+        if selfMessage == 2 do
+          IO.puts "--------- #{nodeID} ---- #{newNodeID} "
+          IO.inspect leafset
+          IO.inspect routingTable
+        end
+
+        if (nodeID == newNodeID) do
+          if selfMessage == 2 do
+            IO.puts "Found at #{nodeID}"
+            send console, {:collectHopNumber, hop}
+          end
         else
-          # Check min max values in leaves
-          if hexToDec(newNodeID) >= hexToDec(Enum.at(Enum.at(leafset, 0), 0)) and hexToDec(newNodeID) <= hexToDec(Enum.at(Enum.at(leafset, length(leafset)-1), 0)) do
-            result = findInLeaves(addToSortedList(leafset, nodeID, self, 0), newNodeID, 0)
-
-            # update leaves
-            if (hexToDec(newNodeID) < hexToDec(nodeID)) do
-              # remove leftmost leaf & insert into routingTable
-              deletedEntry = Enum.at(leafset, 0)
-              pvalue = prefixMatch(0, Enum.at(deletedEntry,0), newNodeID)
-              r = Map.get(routingTable, Integer.to_string(pvalue))
-              r = Map.put(r, String.at(Enum.at(deletedEntry, 0), pvalue), deletedEntry)
-              routingTable = Map.put(routingTable, Integer.to_string(pvalue), r)
-              leafset = List.delete_at(leafset, 0)
-            else
-              # remove rightmost leaf & insert into routingTable
-              deletedEntry = Enum.at(leafset, length(leafset)-1)
-              pvalue = prefixMatch(0, Enum.at(deletedEntry,0), newNodeID)
-              r = Map.get(routingTable, Integer.to_string(pvalue))
-              r = Map.put(r, String.at(Enum.at(deletedEntry, 0), pvalue), deletedEntry)
-              routingTable = Map.put(routingTable, Integer.to_string(pvalue), r)
-              leafset = List.delete_at(leafset, length(leafset)-1)
+          # Check if leafset is not full
+          if length(leafset) < 3 do
+            leafset = Enum.uniq(addToSortedList(leafset, newNodeID, newNodePID, 0))
+            if selfMessage == 2 do
+              IO.puts "Found at #{nodeID}"
+              send console, {:collectHopNumber, hop}
             end
-            # add new discovered node to leafset
-            leafset = addToSortedList(leafset, newNodeID, newNodePID, 0)
+          else
+            # Check min max values in leaves
+            if hexToDec(newNodeID) >= hexToDec(Enum.at(Enum.at(leafset, 0), 0)) and hexToDec(newNodeID) <= hexToDec(Enum.at(Enum.at(leafset, length(leafset)-1), 0)) do
+              result = findInLeaves(addToSortedList(leafset, nodeID, self, 0), newNodeID, 0)
 
-            if (Enum.at(result, 0) != nodeID) do
-              if selfMessage == 0 or selfMessage == 2, do: send Enum.at(result,1), {:discover, newNodePID, newNodeID, selfMessage, hop + 1}
-            else
-              if selfMessage == 2, do: send console, {:collectHopNumber, hop}
-            end
-
-          else #outside leafset range
-
-              # if newNodeID outside leafset range, check routing table
-              p = prefixMatch(0, nodeID, newNodeID)
-              routingNode = Map.get(Map.get(routingTable, Integer.to_string(p)), String.at(newNodeID, p))
-
-              if routingNode == [] do
-                # TUMUR
-                allNodes = buildSortedList(routingTable, [], 30)
-                allNodes = mergeSortedLists([], allNodes, leafset)
-                allNodes = mergeSortedLists([], allNodes, [[nodeID, self]])
-                result = findInLeaves(allNodes, newNodeID, 0)
-                if Enum.at(result, 0) != nodeID do
-                  if selfMessage == 0 or selfMessage == 2, do: send Enum.at(result,1), {:discover, newNodePID, newNodeID, selfMessage, hop + 1}
-                else
-                  if selfMessage == 2, do: send console, {:collectHopNumber, hop}
-                end
-                # add new node to routing table
-                r = Map.get(routingTable, Integer.to_string(p))
-                r = Map.put(r, String.at(newNodeID, p), [newNodeID, newNodePID])
-                routingTable = Map.put(routingTable, Integer.to_string(p), r)
+              # update leaves
+              if (hexToDec(newNodeID) < hexToDec(nodeID)) do
+                # remove leftmost leaf & insert into routingTable
+                deletedEntry = Enum.at(leafset, 0)
+                pvalue = prefixMatch(0, Enum.at(deletedEntry,0), newNodeID)
+                r = Map.get(routingTable, Integer.to_string(pvalue))
+                r = Map.put(r, String.at(Enum.at(deletedEntry, 0), pvalue), deletedEntry)
+                routingTable = Map.put(routingTable, Integer.to_string(pvalue), r)
+                leafset = List.delete_at(leafset, 0)
               else
-                # delegate discovery to node found in routing table
-                if selfMessage == 0 or selfMessage == 2, do: send Enum.at(routingNode,1), {:discover, newNodePID, newNodeID, selfMessage, hop + 1}
+                # remove rightmost leaf & insert into routingTable
+                deletedEntry = Enum.at(leafset, length(leafset)-1)
+                pvalue = prefixMatch(0, Enum.at(deletedEntry,0), newNodeID)
+                r = Map.get(routingTable, Integer.to_string(pvalue))
+                r = Map.put(r, String.at(Enum.at(deletedEntry, 0), pvalue), deletedEntry)
+                routingTable = Map.put(routingTable, Integer.to_string(pvalue), r)
+                leafset = List.delete_at(leafset, length(leafset)-1)
               end
+              # add new discovered node to leafset
+              leafset = Enum.uniq(addToSortedList(leafset, newNodeID, newNodePID, 0))
+
+              if (Enum.at(result, 0) != nodeID) do
+                if selfMessage == 2, do: IO.puts "#1 Hopping to #{Enum.at(result,0)}"
+                if selfMessage == 0 or selfMessage == 2, do: send Enum.at(result,1), {:discover, newNodePID, newNodeID, newNodeName,selfMessage, hop + 1}
+              else
+                if selfMessage == 2 do
+                  IO.puts "Found at #{nodeID}"
+                  send console, {:collectHopNumber, hop}
+                end
+              end
+
+            else #outside leafset range
+
+                # if newNodeID outside leafset range, check routing table
+                p = prefixMatch(0, nodeID, newNodeID)
+                routingNode = Map.get(Map.get(routingTable, Integer.to_string(p)), String.at(newNodeID, p))
+
+                if routingNode == [] do
+                  # TUMUR
+                  allNodes = buildSortedList(routingTable, [], 30)
+                  allNodes = mergeSortedLists([], allNodes, leafset)
+                  # allNodes = mergeSortedLists([], allNodes, [[nodeID, self]])
+                  result = findInLeaves(allNodes, newNodeID, 0)
+                  if Enum.at(result, 0) != nodeID do
+                    if selfMessage == 2, do: IO.puts "#2 Hopping to #{Enum.at(result,0)}"
+                    if selfMessage == 0 or selfMessage == 2, do: send Enum.at(result,1), {:discover, newNodePID, newNodeID, newNodeName, selfMessage, hop + 1}
+                  else
+                    if selfMessage == 2 do
+                      IO.puts "Found at #{nodeID}"
+                      send console, {:collectHopNumber, hop}
+                    end
+                  end
+                  # add new node to routing table
+                  r = Map.get(routingTable, Integer.to_string(p))
+                  r = Map.put(r, String.at(newNodeID, p), [newNodeID, newNodePID])
+                  routingTable = Map.put(routingTable, Integer.to_string(p), r)
+                else
+                  # delegate discovery to node found in routing table
+                  if selfMessage == 2, do: IO.puts "#3 Hopping to #{Enum.at(routingNode,0)}"
+                  if selfMessage == 2, do: IO.inspect Process.alive?(Enum.at(routingNode,1))
+                  if selfMessage == 0 or selfMessage == 2, do: send Enum.at(routingNode,1), {:discover, newNodePID, newNodeID, newNodeName, selfMessage, hop + 1}
+                end
+            end
           end
         end
-        # if (String.at(nodeID, 0) == "A") and
-        #     (String.at(nodeID, 1) == "9") and
-        #     (String.at(nodeID, 2) == "B") and
-        #     (String.at(nodeID, 3) == "7") do
-        #   IO.inspect leafset
-        # end
+
         if selfMessage == 0 do
-          # IO.puts "#{nodeID} [#{length(leafset)}] received discovery msg from #{newNodeID}"
+          IO.puts "#{newNodeName} -> discover -> #{nodename}"
         end
 
-        if selfMessage == 0, do: send newNodePID, {:update, self, nodeID, leafset, routingTable}
-        loop(nodeID, leafset, routingTable, console)
+        if selfMessage == 0, do: send newNodePID, {:update, self, nodeID, nodename, leafset, routingTable}
+        loop(nodeID, leafset, routingTable, console, nodename)
+
+        {:find, newNodePID, newNodeID, hop} ->
+          if (nodeID == newNodeID) do
+            IO.puts "Found at #{nodeID}"
+            send console, {:collectHopNumber, hop}
+          end
+          loop(nodeID, leafset, routingTable, console, nodename)
 
         {:sendRequest, nPID, nID} ->
-          send self, {:discover, nPID, nID, 2, 0}
-          loop(nodeID, leafset, routingTable, console)
+          send self, {:discover, nPID, nID, 0, 2, 0}
+          loop(nodeID, leafset, routingTable, console, nodename)
 
         {:print} ->
-          IO.puts "#{nodeID} | #{length(leafset)} | #{length(buildList(routingTable, [], 30))} | #{Enum.at(Enum.at(leafset, 0), 0)} | #{Enum.at(Enum.at(leafset, length(leafset) - 1), 0)}"
-          loop(nodeID, leafset, routingTable, console)
+          # IO.puts "#{nodeID} | #{length(leafset)} | #{length(buildList(routingTable, [], 30))}"
+          # IO.puts "#{nodeID} | #{length(leafset)} | #{length(buildList(routingTable, [], 30))} | #{Enum.at(Enum.at(leafset, 0), 0)} | #{Enum.at(Enum.at(leafset, length(leafset) - 1), 0)}"
+          loop(nodeID, leafset, routingTable, console, nodename)
     end
   end
 
