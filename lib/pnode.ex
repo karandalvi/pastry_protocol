@@ -9,29 +9,34 @@ defmodule PNode do
                "8" => [], "9" => [], "A" => [], "B" => [],
                "C" => [], "D" => [], "E" => [], "F" => []}
     routingTable = buildRoutingTable(%{}, 30, rowMap)
-    loop(nodeID, leafset, routingTable)
+    loop(nodeID, leafset, routingTable, [])
   end
 
-  def loop(nodeID, leafset, routingTable) do
+  def loop(nodeID, leafset, routingTable, console) do
     receive do
+      {:console, id} ->
+        loop(nodeID, leafset, routingTable, id)
+
       {:join, startNode} ->
-        send startNode, {:discover, self, nodeID, false}
-        loop(nodeID, leafset, routingTable)
+        send startNode, {:discover, self, nodeID, 0, 0}
+        loop(nodeID, leafset, routingTable, console)
 
       {:update, senderPID, senderID, senderLeafset, senderRoutingTable} ->
         # IO.puts "#{nodeID} received routing table from #{senderID}"
+        send console, {:running}
         allNodes = buildList(senderRoutingTable, [], 30) ++ senderLeafset
         allNodes = [[senderID, senderPID] | allNodes]
         for x <- allNodes do
           [nID, nPID] = x
-          send self, {:discover, nPID, nID, true}
+          send self, {:discover, nPID, nID, 1, 0}
         end
-        loop(nodeID, leafset, routingTable)
+        loop(nodeID, leafset, routingTable, console)
 
-      {:discover, newNodePID, newNodeID, selfMessage} ->
+      {:discover, newNodePID, newNodeID, selfMessage, hop} ->
         # Check if leafset is not full
-        if length(leafset) < 15 do
+        if length(leafset) < 4 do
           leafset = addToSortedList(leafset, newNodeID, newNodePID, 0)
+          if selfMessage == 2, do: send console, {:collectHopNumber, hop}
         else
           # Check min max values in leaves
           if hexToDec(newNodeID) >= hexToDec(Enum.at(Enum.at(leafset, 0), 0)) and hexToDec(newNodeID) <= hexToDec(Enum.at(Enum.at(leafset, length(leafset)-1), 0)) do
@@ -59,7 +64,9 @@ defmodule PNode do
             leafset = addToSortedList(leafset, newNodeID, newNodePID, 0)
 
             if (Enum.at(result, 0) != nodeID) do
-              if !selfMessage, do: send Enum.at(result,1), {:discover, newNodePID, newNodeID}
+              if selfMessage == 0 or selfMessage == 2, do: send Enum.at(result,1), {:discover, newNodePID, newNodeID, selfMessage, hop + 1}
+            else
+              if selfMessage == 2, do: send console, {:collectHopNumber, hop}
             end
 
           else #outside leafset range
@@ -75,7 +82,9 @@ defmodule PNode do
                 allNodes = mergeSortedLists([], allNodes, [[nodeID, self]])
                 result = findInLeaves(allNodes, newNodeID, 0)
                 if Enum.at(result, 0) != nodeID do
-                  send Enum.at(result,1), {:discover, newNodePID, newNodeID}
+                  if selfMessage == 0 or selfMessage == 2, do: send Enum.at(result,1), {:discover, newNodePID, newNodeID, selfMessage, hop + 1}
+                else
+                  if selfMessage == 2, do: send console, {:collectHopNumber, hop}
                 end
                 # add new node to routing table
                 r = Map.get(routingTable, Integer.to_string(p))
@@ -83,7 +92,7 @@ defmodule PNode do
                 routingTable = Map.put(routingTable, Integer.to_string(p), r)
               else
                 # delegate discovery to node found in routing table
-                if !selfMessage, do: send Enum.at(routingNode,1), {:discover, newNodePID, newNodeID}
+                if selfMessage == 0 or selfMessage == 2, do: send Enum.at(routingNode,1), {:discover, newNodePID, newNodeID, selfMessage, hop + 1}
               end
           end
         end
@@ -93,16 +102,20 @@ defmodule PNode do
         #     (String.at(nodeID, 3) == "7") do
         #   IO.inspect leafset
         # end
-        if !selfMessage do
+        if selfMessage == 0 do
           # IO.puts "#{nodeID} [#{length(leafset)}] received discovery msg from #{newNodeID}"
         end
 
-        if !selfMessage, do: send newNodePID, {:update, self, nodeID, leafset, routingTable}
-        loop(nodeID, leafset, routingTable)
+        if selfMessage == 0, do: send newNodePID, {:update, self, nodeID, leafset, routingTable}
+        loop(nodeID, leafset, routingTable, console)
 
-        {:print, console} ->
+        {:sendRequest, nPID, nID} ->
+          send self, {:discover, nPID, nID, 2, 0}
+          loop(nodeID, leafset, routingTable, console)
+
+        {:print} ->
           IO.puts "#{nodeID} | #{length(leafset)} | #{length(buildList(routingTable, [], 30))} | #{Enum.at(Enum.at(leafset, 0), 0)} | #{Enum.at(Enum.at(leafset, length(leafset) - 1), 0)}"
-          loop(nodeID, leafset, routingTable)
+          loop(nodeID, leafset, routingTable, console)
     end
   end
 
