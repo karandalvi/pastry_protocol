@@ -31,10 +31,10 @@ defmodule PastryProtocol do
     # newPid = spawn(PNode, :init, [newNode, Integer.to_string(numNodes)])
     send newPid, {:console, self}
     if length(pidList) > 0 do
-      send newPid, {:join, Enum.at(pidList, length(pidList)-1)}
+      # send newPid, {:join, Enum.at(pidList, length(pidList)-1)}
       # send newPid, {:join, Enum.at(pidList, round(:math.floor(:rand.uniform() * length(pidList))))}
-      :timer.sleep(5)
-      # send newPid, {:join, Enum.at(pidList, 0)}
+      :timer.sleep(50)
+      send newPid, {:join, Enum.at(pidList, 0), Enum.at(nodeList, 0)}
     end
     nodeList = nodeList ++ [newNode]
     pidList = pidList ++ [newPid]

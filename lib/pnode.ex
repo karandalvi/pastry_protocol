@@ -18,43 +18,48 @@ defmodule PNode do
       {:console, id} ->
         loop(nodeID, leafset, routingTable, id, nodename)
 
-      {:join, startNode} ->
+      {:join, startNode, startNodeName} ->
+        IO.puts "#{nodeID} sending discover msg to #{startNodeName}"
         send startNode, {:discover, self, nodeID, nodename, 0, 0}
         loop(nodeID, leafset, routingTable, console, nodename)
 
       {:update, senderPID, senderID, senderName, senderLeafset, senderRoutingTable, gossipNumber} ->
-        if gossipNumber < 100 do
+        if gossipNumber < 4 do
 
           # IO.puts "#{senderName} -> table -> #{nodename}"
           # send console, {:running}
           allNodes = buildList(senderRoutingTable, [], 30) ++ senderLeafset
 
-          # if (nodename == "1000000000000020"), do: IO.inspect length(buildList(senderRoutingTable, [], 30))
+          # if (nodename == "1000000000000002"), do: IO.inspect length(buildList(senderRoutingTable, [], 30))
           for x <- allNodes do
+            :timer.sleep(100)
             [nID, nPID] = x
-            send self, {:discover, nPID, nID, nodename, gossipNumber, 0}
+            if nID != nodeID, do: send self, {:discover, nPID, nID, nodename, gossipNumber, 0}
             # :timer.sleep(100)
           end
         end
         loop(nodeID, leafset, routingTable, console, nodename)
 
       {:discover, newNodePID, newNodeID, newNodeName, selfMessage, hop} ->
-
+        if selfMessage == 0, do: IO.puts "1 #{nodeID} receive discover msg from #{newNodeID}"
+        if selfMessage > 0, do: IO.puts "1 #{nodeID} receive update msg from #{newNodeID}"
         # pos = Enum.find_index(leafset, fn(x) -> Enum.at(x,0) == nodeID end)
         # if (hexToDec(newNodeID) < hexToDec(nodeID) and pos <= 5) do
         # if selfMessage == 0, do: IO.puts "#{newNodeName} -> discover -> #{nodename}"
         leafset = Enum.uniq(leafset)  #TODO remove
         if (nodeID == newNodeID) do
-          # search terminates here
+          IO.puts "A1 Search for #{newNodeID} terminated at #{nodeID}"
         else
           # Check if leafset is not full
           if length(leafset) < 6 do
             result = findInLeaves(leafset, newNodeID, 0)
-            if (Enum.at(result, 0) != nodeID) or (Enum.at(result, 0) != newNodeID) do
-              if Enum.at(result, 0) != newNodeID, do: leafset = addToSortedList(leafset, newNodeID, newNodePID, 0)
-              if selfMessage == 0, do: send Enum.at(result,1), {:discover, newNodePID, newNodeID, newNodeName,selfMessage, hop + 1}
+            if Enum.at(result, 0) != newNodeID, do: leafset = addToSortedList(leafset, newNodeID, newNodePID, 0)
+
+            if (Enum.at(result, 0) != nodeID) do
+              if selfMessage == 0, do: IO.puts "2 #{nodeID} sending discover #{newNodeID} to #{Enum.at(result, 0)}"
+              send Enum.at(result,1), {:discover, newNodePID, newNodeID, newNodeName,selfMessage, hop + 1}
             else
-              # search terminates here
+             IO.puts "A2 Search for #{newNodeID} terminated at #{nodeID}"
             end
           else
 
@@ -62,11 +67,12 @@ defmodule PNode do
             # if nodename == "10000000000000000000000000000457", do: IO.puts "#{newNodeName} -- #{pos}"
             if (hexToDec(newNodeID) < hexToDec(nodeID) and pos < 5) or (hexToDec(newNodeID) > hexToDec(nodeID) and length(leafset) - pos <= 5) do
               result = findInLeaves(leafset, newNodeID, 0)
-              if (Enum.at(result, 0) != nodeID) or (Enum.at(result, 0) != newNodeID) do
+              if (Enum.at(result, 0) != nodeID) and (Enum.at(result, 0) != newNodeID) do
                 if Enum.at(result, 0) != newNodeID, do: leafset = addToSortedList(leafset, newNodeID, newNodePID, 0)
+                IO.puts "3 #{nodeID} sending discover #{newNodeID} to #{Enum.at(result, 0)}"
                 if selfMessage == 0, do: send Enum.at(result,1), {:discover, newNodePID, newNodeID, newNodeName,selfMessage, hop + 1}
               else
-                # search terminates here
+                IO.puts "A3 Search for #{newNodeID} terminated at #{nodeID}"
               end
             else
 
@@ -96,9 +102,11 @@ defmodule PNode do
               leafset = Enum.uniq(addToSortedList(leafset, newNodeID, newNodePID, 0))
 
               if (Enum.at(result, 0) != nodeID) do
+
+                IO.puts "4 #{nodeID} sending discover #{newNodeID} to #{Enum.at(result, 0)}"
                 if selfMessage == 0, do: send Enum.at(result,1), {:discover, newNodePID, newNodeID, newNodeName,selfMessage, hop + 1}
               else
-                # search terminates here
+                IO.puts "A4 Search for #{newNodeID} terminated at #{nodeID}"
               end
 
             else #outside leafset range
@@ -114,9 +122,11 @@ defmodule PNode do
                   # allNodes = mergeSortedLists([], allNodes, [[nodeID, self]])
                   result = findInLeaves(allNodes, newNodeID, 0)
                   if Enum.at(result, 0) != nodeID do
+
+                    IO.puts "5 #{nodeID} sending discover #{newNodeID} to #{Enum.at(result, 0)}"
                     if selfMessage == 0, do: send Enum.at(result,1), {:discover, newNodePID, newNodeID, newNodeName, selfMessage, hop + 1}
                   else
-                    # search terminates here
+                    IO.puts "A5 Search for #{newNodeID} terminated at #{nodeID}"
                   end
                   # add new node to routing table
                   r = Map.get(routingTable, Integer.to_string(p))
@@ -124,17 +134,24 @@ defmodule PNode do
                   routingTable = Map.put(routingTable, Integer.to_string(p), r)
                 else
                   # delegate discovery to node found in routing table
-                  # if selfMessage == 0, do: send Enum.at(routingNode,1), {:discover, newNodePID, newNodeID, newNodeName, selfMessage, hop + 1}
+                  IO.puts "7 #{nodeID} sending discover #{newNodeID} to #{Enum.at(routingNode, 0)}"
+                  if selfMessage == 0, do: send Enum.at(routingNode,1), {:discover, newNodePID, newNodeID, newNodeName, selfMessage, hop + 1}
                 end
             end
           end
           end
         end
 
-        if nodename == "1000000000000020", do: IO.inspect leafset
+        # if nodename == "1000000000000002", do: IO.inspect leafset
         # send newNodePID, {:update, self, nodeID, nodename, leafset, routingTable, selfMessage + 1}
         # if selfMessage == 0, do: send newNodePID, {:update, self, nodeID, nodename, leafset, routingTable, 0}
-        if selfMessage >= 0 and selfMessage < 100, do: send newNodePID, {:update, self, nodeID, nodename, leafset, routingTable, selfMessage + 1}
+
+        if selfMessage >= 0 and selfMessage < 100 and nodeID != newNodeID do
+          IO.inspect leafset, label: "6 #{nodeID} sending update to #{newNodeID} with"
+          send newNodePID, {:update, self, nodeID, nodename, leafset, routingTable, selfMessage + 1}
+        end
+
+        IO.inspect leafset, label: "#### #{nodeID} --> "
         loop(nodeID, leafset, routingTable, console, nodename)
 
         {:find, newNodePID, newNodeID, hop} ->
