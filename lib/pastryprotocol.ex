@@ -7,16 +7,33 @@ defmodule PastryProtocol do
     IO.puts "Nodes   : #{numNodes}"
     IO.puts "Requests: #{numRequests}"
     nodeList = start(numNodes, [], [])
+
+    # {:ok, host} = :inet.gethostname
+    # {:ok, {a,b,c,d}} = :inet.getaddr(host, :inet)
+    # a = to_string(a)
+    # b = to_string(b)
+    # c = to_string(c)
+    # d = to_string(d)
+    # serverIp = a<>"."<>b<>"."<>c<>"."<>d
+    # Node.start :"boss@#{serverIp}"
+
+    # :observer.start
+
+
     send self, {:getStatsNew}
     loop(nodeList, numNodes, numRequests, [])
   end
 
   def start(numNodes, nodeList, pidList) when numNodes > 0 do
-    newNode = :crypto.hash(:md5, Integer.to_string(numNodes)) |> Base.encode16()
-    newPid = spawn(PNode, :init, [newNode, Integer.to_string(numNodes)])
+    # newNode = :crypto.hash(:md5, Integer.to_string(numNodes)) |> Base.encode16()
+    newNode = 100 + numNodes
+    newPid = spawn(PNode, :init, [Integer.to_string(newNode), Integer.to_string(newNode)])
+    # newPid = spawn(PNode, :init, [newNode, Integer.to_string(numNodes)])
     send newPid, {:console, self}
     if length(pidList) > 0 do
+      # send newPid, {:join, Enum.at(pidList, length(pidList)-1)}
       # send newPid, {:join, Enum.at(pidList, round(:math.floor(:rand.uniform() * length(pidList))))}
+      :timer.sleep(100)
       send newPid, {:join, Enum.at(pidList, 0)}
     end
     nodeList = nodeList ++ [newNode]
