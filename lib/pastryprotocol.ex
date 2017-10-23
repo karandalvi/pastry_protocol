@@ -8,7 +8,7 @@ defmodule PastryProtocol do
     IO.puts "Requests: #{numRequests}"
     nodeList = start(numNodes, [], [])
     send self, {:getStats}
-    loop(nodeList, numNodes, numRequests, [])
+    loop(nodeList, numNodes, numRequests, [], 0, 0)
   end
 
   def start(numNodes, nodeList, pidList) when numNodes > 0 do
@@ -28,26 +28,40 @@ defmodule PastryProtocol do
     [nodeList, pidList]
   end
 
-  def loop(nodeList, numNodes, numRequests, hops) do
+  def loop(nodeList, numNodes, numRequests, hops, sum, lastMessage) do
     receive do
       {:getStats} ->
         nameList = Enum.at(nodeList, 0)
         pidList = Enum.at(nodeList, 1)
         :timer.sleep(8000)
-        for x <- Enum.at(nodeList, 1) do
-          send x, {:print}
-          r = round(:math.floor(:rand.uniform() * length(pidList)))
-          # send x, {:sendRequest, Enum.at(pidList, r), Enum.at(nameList, r)}
+        for y <- 1..numRequests do
+          for x <- Enum.at(nodeList, 1) do
+            send x, {:print}
+            r = round(:math.floor(:rand.uniform() * length(pidList)))
+            send x, {:sendRequest, Enum.at(pidList, r), Enum.at(nameList, r)}
+          end
         end
-        loop(nodeList, numNodes, numRequests, hops)
+        loop(nodeList, numNodes, numRequests, hops, sum, lastMessage)
 
       {:collectHopNumber, hopCount} ->
         hops = hops ++ [hopCount]
-        IO.inspect length(hops)
-        # if length(hops) == (numRequests * numNodes) do
-        #   IO.puts "All hops completed"
-        # end
-        loop(nodeList, numNodes, numRequests, hops)
+        sum = sum + hopCount
+        IO.puts "Running..."
+        lastMessage = :os.system_time(:millisecond)
+        :timer.sleep(4000)
+        send self, {:check}
+        loop(nodeList, numNodes, numRequests, hops, sum, lastMessage)
+
+      {:check} ->
+        if :os.system_time(:millisecond) - lastMessage > 4000 do
+          send self, {:exit}
+        end
+        send self, {:collectHopNumber, }
+        loop(nodeList, numNodes, numRequests, hops, sum, lastMessage)
+
+        {:exit} ->
+          IO.puts "Hop Average: #{sum / length(hops)}"
+          IO.puts "Exiting Program"
     end
   end
 end

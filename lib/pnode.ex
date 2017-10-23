@@ -110,11 +110,11 @@ defmodule PNode do
         loop(nodeID, leafset, routingTable, console)
 
         {:sendRequest, nPID, nID} ->
-          send self, {:discover, nPID, nID, 2, 0}
+          send self, {:discover, nPID, nID, 2, 1}
           loop(nodeID, leafset, routingTable, console)
 
         {:print} ->
-          IO.puts "#{nodeID} | #{length(leafset)} | #{length(buildList(routingTable, [], 30))} | #{Enum.at(Enum.at(leafset, 0), 0)} | #{Enum.at(Enum.at(leafset, length(leafset) - 1), 0)}"
+          # IO.puts "#{nodeID} | #{length(leafset)} | #{length(buildList(routingTable, [], 30))} | #{Enum.at(Enum.at(leafset, 0), 0)} | #{Enum.at(Enum.at(leafset, length(leafset) - 1), 0)}"
           loop(nodeID, leafset, routingTable, console)
     end
   end
