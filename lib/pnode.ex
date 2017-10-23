@@ -2,23 +2,130 @@ defmodule PNode do
 
   def init(nodeID, nodename) do
     Process.flag(:trap_exit, true)
-    IO.puts "Node started with ID:#{nodename}"
-    # nodename = String.at(nodename, 0) <> String.at(nodename, 1) <> String.at(nodename, 2)
-    leafset = [[nodeID, self]]
+    # IO.puts "Node started with ID:#{nodeID}"
+    # nodename = String.at(nodename, length(nodename)-3) <> String.at(nodename, length(nodename)-2) <> String.at(nodename, length(nodename)-1)
+    leafset = [] #TODO: Add self node to leafset?
     rowMap = %{"0" => [], "1" => [], "2" => [], "3" => [],
                "4" => [], "5" => [], "6" => [], "7" => [],
                "8" => [], "9" => [], "A" => [], "B" => [],
                "C" => [], "D" => [], "E" => [], "F" => []}
-    routingTable = buildRoutingTable(%{}, 30, rowMap)
+    routingTable = buildRoutingTable(%{}, 15, rowMap) #TODO: Change to 30
     loop(nodeID, leafset, routingTable, [], nodename)
   end
 
   def loop(nodeID, leafset, routingTable, console, nodename) do
     receive do
+
+      {:init, startPID, nodeList, pidList} ->
+        for x <- 1..length(nodeList) do
+          if prefixMatch(0, nodeID, Enum.at(nodeList, x)) == 15 do
+            send self, {:addLeaf, Enum.at(nodeList, x), Enum.at(pidList, x)}
+          else
+            send self, {:addRoute, Enum.at(nodeList, x), Enum.at(pidList, x)}
+          end
+        end
+        send startPID, {:join, nodeID, self, nodename}
+        loop(nodeID, leafset, routingTable, console, nodename)
+
+      {:init, startPID} ->
+        send startPID, {:join, nodeID, self, nodename}
+        loop(nodeID, leafset, routingTable, console, nodename)
+
+      {:state, senderID, senderPID, senderLeafset, senderRoutingTable} ->
+        if senderID != nodeID do
+          allNodes = Enum.uniq(buildList(senderRoutingTable, [], 15) ++ senderLeafset ++ [[senderID, senderPID]])
+          for x <- allNodes do
+            [xID, xPID] = x
+            if prefixMatch(0, nodeID, xID) == 15 do
+              send self, {:addLeaf, xID, xPID}
+            else
+              send self, {:addRoute, xID, xPID}
+            end
+          end
+        end
+        loop(nodeID, leafset, routingTable, console, nodename)
+
+      {:addLeaf, leafID, leafPID} ->
+        leafset = addToSortedList(leafset, leafID, leafPID, 0)
+        # IO.inspect leafset, label: "Node #{nodeID} -> "
+        loop(nodeID, Enum.uniq(leafset), routingTable, console, nodename)
+
+      {:addRoute, xID, xPID} ->
+        pm = prefixMatch(0, nodeID, xID)
+        row = Map.get(routingTable, Integer.to_string(pm))
+        row = Map.put(row, String.at(xID, pm), [xID, xPID])
+        routingTable = Map.put(routingTable, Integer.to_string(pm), row)
+        # IO.inspect routingTable, label: "Node #{nodeID} -> "
+        loop(nodeID, leafset, routingTable, console, nodename)
+
+      {:join, joinID, joinPID, joinName} ->
+        send joinPID, {:state, nodeID, self, leafset, routingTable}
+        if (nodeID == joinID) do
+          IO.puts "#1 Node received join message from itself"
+        else
+          pm = prefixMatch(0, nodeID, joinID)
+          if length(leafset) > 0
+          and hexToDec(Enum.at(Enum.at(leafset,0),0)) <= hexToDec(joinID)
+          and hexToDec(Enum.at(Enum.at(leafset,length(leafset)-1), 0)) <= hexToDec(joinID) do
+            result = findInLeaves(leafset, joinID, 0)
+            send Enum.at(result,1), {:join, joinID, joinPID, joinName}
+          else
+            row = Map.get(routingTable, Integer.to_string(pm))
+            entry = Map.get(row, String.at(joinID, pm))
+            if length(entry) > 0 do
+              send Enum.at(entry, 1), {:join, joinID, joinPID, joinName}
+            else
+              allNodes = buildList(routingTable, [], 15) #TODO: Change to 30
+              allNodes = allNodes ++ leafset
+              for x <- allNodes do
+                [xID, xPID] = x
+                if prefixMatch(0, xID,joinID) >= prefixMatch(0, nodeID, joinID) do
+                  send xPID, {:join, joinID, joinPID, joinName}
+                end
+              end
+            end
+          end
+        end
+        loop(nodeID, leafset, routingTable, console, nodename)
+
+      {:route, searchID, searchPID, searchName, hop} ->
+        IO.puts "#{hop} - #{nodeID} - #{searchID}"
+        IO.inspect leafset
+        IO.inspect routingTable
+        :timer.sleep(2000)
+        if (nodeID == searchID) do
+          IO.puts "#1 Search terminated"
+          send console, {:hopCount, hop}
+        else
+          pm = prefixMatch(0, nodeID, searchID)
+          if length(leafset) > 0
+          and hexToDec(Enum.at(Enum.at(leafset,0),0)) <= hexToDec(searchID)
+          and hexToDec(Enum.at(Enum.at(leafset,length(leafset)-1), 0)) <= hexToDec(searchID) do
+            result = findInLeaves(leafset, searchID, 0)
+            send Enum.at(result,1), {:route, searchID, searchPID, searchName, hop+1}
+          else
+            row = Map.get(routingTable, Integer.to_string(pm))
+            entry = Map.get(row, String.at(searchID, pm))
+            if length(entry) > 0 do
+              send Enum.at(entry, 1), {:route, searchID, searchPID, searchName, hop+1}
+            else
+              allNodes = buildList(routingTable, [], 15) #TODO: Change to 30
+              allNodes = allNodes ++ leafset
+              for x <- allNodes do
+                [xID, xPID] = x
+                if prefixMatch(0, xID,searchID) >= prefixMatch(0, nodeID, searchID) do
+                  send xPID, {:route, searchID, searchPID, searchName, hop+1}
+                end
+              end
+            end
+          end
+        end
+        loop(nodeID, leafset, routingTable, console, nodename)
+
       {:console, id} ->
         loop(nodeID, leafset, routingTable, id, nodename)
 
-      {:join, startNode, startNodeName} ->
+      {:Oldjoin, startNode, startNodeName} ->
         IO.puts "#{nodeID} sending discover msg to #{startNodeName}"
         send startNode, {:discover, self, nodeID, nodename, 0, 0}
         loop(nodeID, leafset, routingTable, console, nodename)
@@ -154,7 +261,7 @@ defmodule PNode do
         IO.inspect leafset, label: "#### #{nodeID} --> "
         loop(nodeID, leafset, routingTable, console, nodename)
 
-        {:find, newNodePID, newNodeID, hop} ->
+        {:Oldfind, newNodePID, newNodeID, hop} ->
           if (nodeID == newNodeID) do
             IO.puts "Found at #{nodeID}"
             send console, {:collectHopNumber, hop}
