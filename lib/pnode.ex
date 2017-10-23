@@ -34,7 +34,7 @@ defmodule PNode do
 
       {:discover, newNodePID, newNodeID, selfMessage, hop} ->
         # Check if leafset is not full
-        if length(leafset) < 4 do
+        if length(leafset) < 15 do
           leafset = addToSortedList(leafset, newNodeID, newNodePID, 0)
           if selfMessage == 2, do: send console, {:collectHopNumber, hop}
         else

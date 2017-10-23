@@ -33,7 +33,7 @@ defmodule PastryProtocol do
       {:getStats} ->
         nameList = Enum.at(nodeList, 0)
         pidList = Enum.at(nodeList, 1)
-        :timer.sleep(8000)
+        :timer.sleep(8000) #TODO: 8000 
         for y <- 1..numRequests do
           for x <- Enum.at(nodeList, 1) do
             send x, {:print}
