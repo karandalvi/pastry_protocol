@@ -6,47 +6,74 @@ defmodule PastryProtocol do
     numRequests = String.to_integer(numRequests)
     IO.puts "Nodes   : #{numNodes}"
     IO.puts "Requests: #{numRequests}"
-    nodeList = start(numNodes, [], [])
-    send self, {:hops}
-    loop(nodeList, numNodes, numRequests, [])
+    nodeList = start(numNodes, [])
+    # IO.inspect nodeList
+    send self, {:build}
+    loop(nodeList, numNodes, numRequests, [], :os.system_time(:millisecond))
   end
+  # newNode = :crypto.hash(:md5, Integer.to_string(numNodes)) |> Base.encode16()
 
-  def start(numNodes, nodeList, pidList) when numNodes > 0 do
-    # newNode = :crypto.hash(:md5, Integer.to_string(numNodes)) |> Base.encode16()
-    newNode = 1000000000000000 + numNodes
-    newPid = spawn(PNode, :init, [Integer.to_string(newNode), Integer.to_string(newNode)])
+  def start(numNodes, nodeList) when numNodes > 0 do
+    newNode = Integer.to_string(1000000000000000 + numNodes)
+    newPid = spawn(PNode, :init, [newNode])
     send newPid, {:console, self}
-
-    if length(pidList) > 100 do
-      send newPid, {:init, Enum.at(pidList, length(pidList)-1)}
-    else
-      if length(pidList) > 0, do: send newPid, {:init, Enum.at(pidList, length(pidList)-1), nodeList, pidList}
-    end
-    nodeList = nodeList ++ [Integer.to_string(newNode)]
-    pidList = pidList ++ [newPid]
-    start(numNodes-1, nodeList, pidList)
+    nodeList = addToSortedList(nodeList, newNode, newPid, 0)
+    start(numNodes-1, nodeList)
   end
 
-  def start(numNodes, nodeList, pidList) when numNodes <= 0 do
-    [nodeList, pidList]
+  def start(numNodes, nodeList) when numNodes <= 0 do
+    nodeList
   end
 
-  def loop(nodeList, numNodes, numRequests, hopArray) do
+  def loop(nodeList, numNodes, numRequests, hopArray, lastMessage) do
     receive do
-      {:hops} ->
-        [nameList, pidList] = nodeList
-        :timer.sleep(8000)
-        for x <- 1..1 do
-          r = round(:math.floor(:rand.uniform() * length(nodeList)))
-          send Enum.at(pidList, round(:math.floor(:rand.uniform() * length(pidList)))),
-              {:route, Enum.at(nameList, r), Enum.at(pidList, r), Enum.at(nameList, r), 0}
-        end
-        loop(nodeList, numNodes, numRequests, hopArray)
+      {:build} ->
+        for x <- 0..length(nodeList)-1 do
+          if (x != 0) do
+            [currID, currPID] = Enum.at(nodeList, x)
+            [prevID, prevPID] = Enum.at(nodeList, x-1)
+            # IO.puts "#{currID} sent join to #{prevID}"
 
-        {:hopCount, hops} ->
-          hopArray = hopArray ++ [hops]
-          IO.puts hops
-          loop(nodeList, numNodes, numRequests, hopArray)
+            send prevPID, {:join, currID, currPID}
+          end
+        end
+        IO.puts "#{:os.system_time(:millisecond)}"
+        # :timer.sleep(15000)
+        send self, {:listen}
+        loop(nodeList, numNodes, numRequests, hopArray, lastMessage)
+
+      {:listen} ->
+        if :os.system_time(:millisecond) - lastMessage > 5000 do
+          IO.puts "Network Built"
+          IO.puts "#{:os.system_time(:millisecond)}"
+          send self, {:request}
+        else
+          send self, {:listen}
+        end
+        loop(nodeList, numNodes, numRequests, hopArray, lastMessage)
+
+      {:running} ->
+        lastMessage = :os.system_time(:millisecond)
+        loop(nodeList, numNodes, numRequests, hopArray, lastMessage)
+
+      {:request} ->
+        [xID, xPID] = Enum.at(nodeList,4)
+        [sID, sPID] = Enum.at(nodeList, 43)
+        send xPID, {:route, sID, sPID, 0}
+        loop(nodeList, numNodes, numRequests, hopArray, lastMessage)
     end
+  end
+
+  def addToSortedList(list, value, pid, i) do
+    if i == length(list) or hexToDec(Enum.at(Enum.at(list,i), 0)) > hexToDec(value) do
+      list = List.insert_at(list, i, [value,pid])
+    else
+      addToSortedList(list, value, pid, i+1)
+    end
+  end
+
+  def hexToDec(s) do
+    {i, ""} = Integer.parse(s, 16)
+    i
   end
 end
