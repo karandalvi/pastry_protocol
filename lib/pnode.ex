@@ -44,7 +44,7 @@ defmodule PNode do
           send newPID, {:state, nodeID, self, leafset, routingTable}
           loop(nodeID, leafset, routingTable, console, map)
         else
-          if (count < 2) do
+          if (count < 1) do
             map = Map.put(map, newID, count+1)
             send newPID, {:state, nodeID, self, leafset, routingTable}
             loop(nodeID, leafset, routingTable, console, map)
@@ -141,11 +141,11 @@ defmodule PNode do
         loop(nodeID, leafset, routingTable, console, map)
 
       {:route, searchID, searchPID, hop} ->
-        IO.puts "#{hop} - #{nodeID} - #{searchID}"
-        IO.inspect leafset
-        IO.inspect routingTable
+        # IO.puts "#{hop} - #{nodeID} - #{searchID}"
+        # IO.inspect leafset
+        # IO.inspect routingTable
         if (nodeID == searchID) do
-          IO.puts "#1 Search terminated"
+          send console, {:hop, hop}
         else
           pm = prefixMatch(0, nodeID, searchID)
           if length(leafset) > 0
@@ -157,7 +157,7 @@ defmodule PNode do
             row = Map.get(routingTable, Integer.to_string(pm))
             entry = Map.get(row, String.at(searchID, pm))
             if length(entry) > 0 do
-              IO.puts "forwarding route to #{Enum.at(entry, 0)}"
+              # IO.puts "forwarding route to #{Enum.at(entry, 0)}"
               send Enum.at(entry, 1), {:route, searchID, searchPID, hop+1}
             else
 
@@ -165,7 +165,7 @@ defmodule PNode do
               allNodes = allNodes ++ leafset
               nextHop = findInRoutingTable(allNodes, pm, abs(hexToDec(searchID) - hexToDec(nodeID)), searchID, [])
               if (nextHop == []) do
-                IO.puts "#1 Search terminated at #{nodeID}"
+                send console, {:hop, hop}
               else
                 for x <- nextHop do
                   [xID, xPID] = x
